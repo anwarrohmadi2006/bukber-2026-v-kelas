@@ -34,8 +34,10 @@ function calculateItemTotal(item: CartItem, quantity: number): number {
 
 export const cart = createCartStore();
 
-// User name store
+// User identity stores
 export const userName = writable<string>('');
+export const userNIM = writable<string>('');
+export const studentNo = writable<number>(0);
 
 // Dynamic subsidy amount store — fetched from API, default from menu.ts
 export const subsidyAmountStore = writable<number>(SUBSIDY_AMOUNT);
@@ -66,10 +68,18 @@ export const subsidyApplied = derived(
   ([$subTotal, $subsidyAmount]) => Math.min($subTotal, $subsidyAmount)
 );
 
-// Derived store for final total to pay (uses dynamic subsidy)
+/**
+ * Derived store for final total to pay (uses dynamic subsidy)
+ * Unique Payment Amount Logic:
+ * If the user's total exceeds the subsidy, add the user's list number to the final amount.
+ */
 export const finalTotalToPay = derived(
-  [subTotal, subsidyAmountStore],
-  ([$subTotal, $subsidyAmount]) => Math.max(0, $subTotal - $subsidyAmount)
+  [subTotal, subsidyAmountStore, studentNo],
+  ([$subTotal, $subsidyAmount, $studentNo]) => {
+    const baseToPay = Math.max(0, $subTotal - $subsidyAmount);
+    // If there is an amount to pay, add the student list number
+    return baseToPay > 0 ? baseToPay + $studentNo : 0;
+  }
 );
 
 // Derived store for item count
@@ -92,4 +102,6 @@ export function generateOrderPayload(): Order {
 export function resetOrder() {
   cart.clear();
   userName.set('');
+  userNIM.set('');
+  studentNo.set(0);
 }
