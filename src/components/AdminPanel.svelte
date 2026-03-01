@@ -6,10 +6,14 @@
   interface Order {
     id: number;
     userName: string;
+    userNIM?: string;
+    studentNo?: number;
     items: CartItem[];
     subTotal: number;
     subsidyApplied: number;
     finalTotalToPay: number;
+    paymentProofUrl?: string;
+    paymentStatus?: "pending" | "approved";
     createdAt: string;
   }
 
@@ -23,6 +27,7 @@
   let loading = $state(true);
   let error = $state<string | null>(null);
   let activeTab = $state<"orders" | "stats">("orders");
+  let viewingImageUrl = $state<string | null>(null);
   let isAdminMode = $state(true);
   let editingOrder = $state<Order | null>(null);
   let subsidyAmount = $state(30000);
@@ -167,6 +172,30 @@
     }
   }
 
+  async function approvePayment(order: Order) {
+    try {
+      const response = await fetch("/api/orders", {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ ...order, paymentStatus: "approved" }),
+      });
+
+      if (!response.ok) {
+        throw new Error("Failed to approve payment");
+      }
+
+      // Update local state
+      const index = orders.findIndex((o) => o.id === order.id);
+      if (index !== -1) {
+        orders[index].paymentStatus = "approved";
+      }
+    } catch (e) {
+      alert("Gagal memverifikasi pembayaran.");
+    }
+  }
+
   function startEditingOrder(order: Order) {
     editingOrder = { ...order };
   }
@@ -247,6 +276,47 @@
     });
   }
 
+  async function resetDatabase() {
+    if (
+      !confirm(
+        "PERINGATAN BAHAYA: Apakah Anda yakin ingin MENGHAPUS SEMUA PESANAN secara permanen? Data ini tidak dapat dikembalikan!",
+      )
+    )
+      return;
+
+    // Double confirmation for safety
+    if (
+      !confirm(
+        "Ini adalah konfirmasi terakhir. Semua database akan di-reset menjadi kosong. Lanjutkan?",
+      )
+    )
+      return;
+
+    try {
+      const response = await fetch(`/api/orders?id=ALL`, {
+        method: "DELETE",
+        headers: {
+          "Content-Type": "application/json",
+        },
+      });
+
+      if (!response.ok) {
+        if (response.status === 401) {
+          error = "Sesi admin telah habis. Silakan login kembali.";
+          window.location.href = "/admin/login";
+          return;
+        }
+        throw new Error("Failed to reset database");
+      }
+
+      await fetchOrders(true);
+      alert("Seluruh database pesanan berhasil direset!");
+    } catch (e) {
+      error = e instanceof Error ? e.message : "Unknown error";
+      alert("Gagal mereset database: " + error);
+    }
+  }
+
   async function handleLogout() {
     try {
       const response = await fetch("/api/auth/logout", {
@@ -266,6 +336,8 @@
     const ordersData = orders.flatMap((order) =>
       order.items.map((item) => ({
         Nama: order.userName,
+        NIM: order.userNIM || "-",
+        "No. Urut": order.studentNo || "-",
         Tanggal: formatDate(order.createdAt),
         Menu: item.name,
         Varian: getVariantText(item) || "-",
@@ -275,6 +347,8 @@
         "Subtotal Pesanan": order.subTotal,
         Subsidi: order.subsidyApplied,
         "Total Bayar": order.finalTotalToPay,
+        "Status Pembayaran":
+          order.paymentStatus === "approved" ? "Disetujui" : "Menunggu",
       })),
     );
 
@@ -383,27 +457,27 @@
     {#if isAdminMode}
       <div class="bg-white rounded-xl p-4 shadow-sm mb-6">
         <h3 class="font-semibold text-gray-700 mb-3">⚙️ Pengaturan Subsidi</h3>
-        <div class="flex items-center gap-3">
+        <div class="flex flex-col sm:flex-row sm:items-center gap-3">
           <label
             for="subsidy-input"
-            class="text-sm text-gray-600 whitespace-nowrap"
+            class="text-sm font-medium text-gray-700 whitespace-nowrap"
             >Subsidi per orang:</label
           >
-          <div class="flex items-center gap-2 flex-1">
-            <span class="text-gray-500 text-sm">Rp</span>
+          <div class="flex items-center gap-2 w-full sm:flex-1">
+            <span class="text-gray-500 text-sm font-bold">Rp</span>
             <input
               id="subsidy-input"
               type="number"
               bind:value={subsidyAmount}
               min="0"
               step="1000"
-              class="flex-1 p-2 border border-gray-300 rounded-lg text-sm"
+              class="flex-1 p-2 border border-emerald-300 focus:ring-2 focus:ring-emerald-500 outline-none rounded-lg text-sm transition-all"
             />
           </div>
           <button
             onclick={saveSubsidyAmount}
             disabled={savingSubsidy}
-            class="bg-amber-500 hover:bg-amber-600 text-white px-4 py-2 rounded-lg text-sm transition-colors disabled:opacity-50"
+            class="w-full sm:w-auto bg-amber-500 hover:bg-amber-600 text-white font-bold px-5 py-2 rounded-lg text-sm transition-colors disabled:opacity-50"
           >
             {savingSubsidy ? "Menyimpan..." : "Simpan"}
           </button>
@@ -415,26 +489,26 @@
     {/if}
 
     <!-- Action Buttons -->
-    <div class="flex flex-wrap gap-2 mb-4">
+    <div class="flex flex-col sm:flex-row flex-wrap gap-2 mb-4">
       <button
         onclick={() => {
           fetchOrders(isAdminMode);
         }}
         disabled={loading}
-        class="bg-emerald-600 text-white px-4 py-2 rounded-lg hover:bg-emerald-700 transition-colors disabled:opacity-50 flex items-center gap-2"
+        class="w-full sm:w-auto justify-center bg-emerald-600 text-white px-4 py-2 rounded-lg hover:bg-emerald-700 font-medium transition-colors disabled:opacity-50 flex items-center gap-2 shadow-sm"
       >
         {#if loading}
           <span class="animate-spin">&#8635;</span>
         {:else}
           <span>&#8635;</span>
         {/if}
-        Refresh
+        Refresh Data
       </button>
 
       <button
         onclick={exportToExcel}
         disabled={orders.length === 0}
-        class="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 flex items-center gap-2"
+        class="w-full sm:w-auto justify-center bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 font-medium transition-colors disabled:opacity-50 flex items-center gap-2 shadow-sm"
       >
         <svg
           class="w-4 h-4"
@@ -449,8 +523,30 @@
             d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
           ></path>
         </svg>
-        Export Excel
+        Download Excel
       </button>
+
+      {#if isAdminMode}
+        <button
+          onclick={resetDatabase}
+          class="w-full sm:w-auto sm:ml-auto justify-center bg-rose-100 text-rose-700 font-bold px-4 py-2 rounded-lg hover:bg-rose-200 transition-colors flex items-center gap-2 border border-rose-200"
+        >
+          <svg
+            class="w-4 h-4"
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+          >
+            <path
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              stroke-width="2"
+              d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
+            ></path>
+          </svg>
+          Reset Database
+        </button>
+      {/if}
     </div>
 
     <!-- Tab Navigation -->
@@ -507,19 +603,19 @@
               <thead class="bg-gray-50">
                 <tr>
                   <th
-                    class="text-left px-4 py-3 text-sm font-semibold text-gray-600"
+                    class="text-left px-4 py-3 text-sm font-semibold text-gray-600 whitespace-nowrap"
                     >No</th
                   >
                   <th
-                    class="text-left px-4 py-3 text-sm font-semibold text-gray-600"
+                    class="text-left px-4 py-3 text-sm font-semibold text-gray-600 min-w-[200px]"
                     >Menu</th
                   >
                   <th
-                    class="text-center px-4 py-3 text-sm font-semibold text-gray-600"
+                    class="text-center px-4 py-3 text-sm font-semibold text-gray-600 whitespace-nowrap"
                     >Jumlah</th
                   >
                   <th
-                    class="text-right px-4 py-3 text-sm font-semibold text-gray-600"
+                    class="text-right px-4 py-3 text-sm font-semibold text-gray-600 whitespace-nowrap"
                     >Total Pendapatan</th
                   >
                 </tr>
@@ -583,23 +679,78 @@
               <div
                 class="bg-gradient-to-r from-emerald-50 to-amber-50 px-4 py-3 border-b"
               >
-                <div class="flex items-center justify-between">
+                <div
+                  class="flex flex-col sm:flex-row sm:items-center justify-between gap-3"
+                >
                   <div>
-                    <h3 class="font-bold text-gray-800">{order.userName}</h3>
-                    <p class="text-xs text-gray-500">
-                      {formatDate(order.createdAt)}
-                    </p>
+                    <h3 class="font-bold text-gray-800 text-lg">
+                      {order.userName}
+                      {#if order.userNIM}
+                        <span
+                          class="text-xs font-bold text-emerald-700 bg-emerald-100/50 px-2 py-0.5 rounded ml-2"
+                        >
+                          #{order.userNIM}
+                        </span>
+                      {/if}
+                    </h3>
+                    <div
+                      class="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-gray-500 mt-1 font-medium"
+                    >
+                      <span>{formatDate(order.createdAt)}</span>
+                      {#if order.studentNo}
+                        <span
+                          class="bg-amber-100 text-amber-800 px-1.5 py-0.5 rounded font-bold"
+                          >No. Urut: {order.studentNo}</span
+                        >
+                      {/if}
+                    </div>
+                    <div class="mt-3 text-xs flex">
+                      {#if order.paymentStatus === "approved"}
+                        <span
+                          class="bg-emerald-100 text-emerald-800 shadow-sm border border-emerald-200 font-bold px-3 py-1.5 rounded-lg flex items-center gap-1.5"
+                        >
+                          <svg
+                            class="w-3.5 h-3.5"
+                            fill="none"
+                            stroke="currentColor"
+                            viewBox="0 0 24 24"
+                            ><path
+                              stroke-linecap="round"
+                              stroke-linejoin="round"
+                              stroke-width="2.5"
+                              d="M5 13l4 4L19 7"
+                            ></path></svg
+                          >
+                          Lunas
+                        </span>
+                      {:else}
+                        <span
+                          class="bg-amber-100 text-amber-800 shadow-sm border border-amber-200 font-bold px-3 py-1.5 rounded-lg flex items-center gap-1.5"
+                        >
+                          <div
+                            class="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse"
+                          ></div>
+                          Menunggu Konfirmasi
+                        </span>
+                      {/if}
+                    </div>
                   </div>
-                  <div class="text-right">
+                  <div class="text-left sm:text-right mt-1 sm:mt-0">
                     {#if order.finalTotalToPay > 0}
-                      <span
-                        class="bg-amber-100 text-amber-700 px-3 py-1 rounded-full text-sm font-medium"
-                      >
-                        Bayar: {formatRupiah(order.finalTotalToPay)}
-                      </span>
+                      <div class="flex flex-col">
+                        <span
+                          class="text-[10px] text-gray-500 font-bold uppercase tracking-wider mb-0.5"
+                          >Tagihan</span
+                        >
+                        <span
+                          class="text-xl sm:text-lg font-black text-gray-800 tracking-tight"
+                        >
+                          {formatRupiah(order.finalTotalToPay)}
+                        </span>
+                      </div>
                     {:else}
                       <span
-                        class="bg-emerald-100 text-emerald-700 px-3 py-1 rounded-full text-sm font-medium"
+                        class="bg-emerald-100 border border-emerald-200 shadow-sm text-emerald-800 px-4 py-1.5 rounded-full text-sm font-black tracking-widest"
                       >
                         GRATIS
                       </span>
@@ -658,19 +809,46 @@
                 </div>
 
                 {#if isAdminMode}
-                  <div class="mt-4 flex gap-2">
-                    <button
-                      onclick={() => startEditingOrder(order)}
-                      class="text-sm bg-yellow-500 hover:bg-yellow-600 text-white px-3 py-1 rounded transition-colors"
+                  <div
+                    class="mt-5 pt-4 border-t border-gray-100 flex flex-col sm:flex-row gap-3 justify-between sm:items-center"
+                  >
+                    <div
+                      class="grid grid-cols-2 sm:flex sm:flex-wrap gap-2 w-full sm:w-auto"
                     >
-                      Edit
-                    </button>
-                    <button
-                      onclick={() => deleteOrder(order.id)}
-                      class="text-sm bg-red-500 hover:bg-red-600 text-white px-3 py-1 rounded transition-colors"
-                    >
-                      Hapus
-                    </button>
+                      {#if order.paymentProofUrl}
+                        <button
+                          onclick={() =>
+                            (viewingImageUrl = order.paymentProofUrl || null)}
+                          class="w-full sm:w-auto text-xs sm:text-sm bg-blue-50 text-blue-700 hover:bg-blue-100 border border-blue-200 px-3 py-2 rounded-lg transition-colors flex justify-center items-center gap-1.5 font-bold shadow-sm"
+                        >
+                          Lihat Bukti
+                        </button>
+                      {/if}
+
+                      {#if order.paymentStatus !== "approved" && order.finalTotalToPay > 0}
+                        <button
+                          onclick={() => approvePayment(order)}
+                          class="w-full sm:w-auto text-xs sm:text-sm bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-2 rounded-lg transition-all font-bold shadow-sm"
+                        >
+                          Approve
+                        </button>
+                      {/if}
+                    </div>
+
+                    <div class="flex gap-2 w-full sm:w-auto">
+                      <button
+                        onclick={() => startEditingOrder(order)}
+                        class="flex-1 sm:flex-none text-center text-sm border border-gray-300 hover:bg-gray-50 text-gray-700 font-bold px-4 py-2 rounded-lg transition-colors"
+                      >
+                        Edit
+                      </button>
+                      <button
+                        onclick={() => deleteOrder(order.id)}
+                        class="flex-1 sm:flex-none text-center text-sm border border-rose-200 text-rose-600 font-bold hover:bg-rose-50 px-4 py-2 rounded-lg transition-colors"
+                      >
+                        Hapus
+                      </button>
+                    </div>
                   </div>
                 {/if}
               </div>
@@ -700,6 +878,33 @@
               type="text"
               class="w-full p-2 border border-gray-300 rounded-lg"
               bind:value={editingOrder.userName}
+            />
+          </div>
+
+          <div>
+            <label
+              for="edit-nim"
+              class="block text-sm font-medium text-gray-700 mb-1">NIM</label
+            >
+            <input
+              id="edit-nim"
+              type="text"
+              class="w-full p-2 border border-gray-300 rounded-lg"
+              bind:value={editingOrder.userNIM}
+            />
+          </div>
+
+          <div>
+            <label
+              for="edit-student-no"
+              class="block text-sm font-medium text-gray-700 mb-1"
+              >No. Urut</label
+            >
+            <input
+              id="edit-student-no"
+              type="number"
+              class="w-full p-2 border border-gray-300 rounded-lg"
+              bind:value={editingOrder.studentNo}
             />
           </div>
 
@@ -762,6 +967,52 @@
             Simpan
           </button>
         </div>
+      </div>
+    </div>
+  {/if}
+
+  <!-- Image Viewer Modal -->
+  {#if viewingImageUrl}
+    <!-- svelte-ignore a11y_click_events_have_key_events -->
+    <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+    <div
+      class="fixed inset-0 bg-black/90 backdrop-blur-sm flex items-center justify-center p-4 z-50 cursor-zoom-out"
+      role="dialog"
+      aria-modal="true"
+      tabindex="-1"
+      onclick={() => (viewingImageUrl = null)}
+    >
+      <!-- svelte-ignore a11y_click_events_have_key_events -->
+      <!-- svelte-ignore a11y_no_static_element_interactions -->
+      <div
+        class="max-w-3xl w-full max-h-[90vh] flex flex-col cursor-auto"
+        onclick={(e) => e.stopPropagation()}
+      >
+        <div class="flex justify-end mb-2">
+          <button
+            aria-label="Tutup gambar"
+            onclick={() => (viewingImageUrl = null)}
+            class="text-white bg-white/20 hover:bg-white/40 rounded-full p-2 transition-colors"
+          >
+            <svg
+              class="w-6 h-6"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+              ><path
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                stroke-width="2"
+                d="M6 18L18 6M6 6l12 12"
+              ></path></svg
+            >
+          </button>
+        </div>
+        <img
+          src={viewingImageUrl}
+          alt="Bukti Pembayaran Penuh"
+          class="w-full h-full object-contain rounded-xl shadow-2xl"
+        />
       </div>
     </div>
   {/if}

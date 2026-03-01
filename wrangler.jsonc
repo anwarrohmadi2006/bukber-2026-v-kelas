@@ -6,7 +6,6 @@
 		"nodejs_compat",
 		"global_fetch_strictly_public"
 	],
-
 	"observability": {
 		"enabled": true
 	},
@@ -22,6 +21,12 @@
 			"database_name": "bukber-orders",
 			"database_id": "52fbfbfe-da22-47cf-bbf7-30922781a41d",
 			"migrations_dir": "migrations"
+		}
+	],
+	"r2_buckets": [
+		{
+			"binding": "PAYMENTS_BUCKET",
+			"bucket_name": "bukber-payments"
 		}
 	]
 }

@@ -1,6 +1,22 @@
 ---
 import "../styles/global.css";
 import OrderForm from "../components/OrderForm.svelte";
+
+let initialSubsidy = 30000;
+try {
+  const env = (Astro.locals as any).runtime?.env || import.meta.env;
+  const db = env?.DB;
+  if (db) {
+    const result = await db
+      .prepare("SELECT value FROM settings WHERE key = 'subsidy_amount'")
+      .first();
+    if (result) {
+      initialSubsidy = parseInt(result.value);
+    }
+  }
+} catch (e) {
+  // Graceful fallback to default
+}
 ---
 
 <!doctype html>
@@ -22,6 +38,6 @@ import OrderForm from "../components/OrderForm.svelte";
     <title>Bukber 2026 | Official Catering & Menu Selection</title>
   </head>
   <body>
-    <OrderForm client:load />
+    <OrderForm client:load {initialSubsidy} />
   </body>
 </html>

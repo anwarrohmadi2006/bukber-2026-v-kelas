@@ -1,0 +1,214 @@
+---
+import "../../styles/global.css";
+import UploadProof from "../../components/UploadProof.svelte";
+import QRCodeRenderer from "../../components/QRCodeRenderer.svelte";
+import { generateDynamicQRIS } from "../../lib/utils/qris";
+
+export const prerender = false; // Server-Side Rendered only
+
+// 1. Extract Order ID
+const { id } = Astro.params;
+
+// 2. Fetch Order from D1
+const env = (Astro.locals as any).runtime?.env || import.meta.env;
+const db = env?.DB;
+
+if (!db || !id) {
+  return Astro.redirect("/");
+}
+
+let order = null;
+try {
+  const result = await db.prepare("SELECT * FROM orders WHERE id = ?").bind(id).first();
+  if (result) {
+    order = {
+      id: result.id,
+      userName: result.user_name,
+      userNIM: result.user_nim,
+      studentNo: result.student_no,
+      items: JSON.parse(result.items),
+      subTotal: result.sub_total,
+      subsidyApplied: result.subsidy_applied,
+      finalTotalToPay: result.final_total,
+      paymentProofUrl: result.payment_proof_url,
+      paymentStatus: result.payment_status,
+      createdAt: result.created_at
+    };
+  }
+} catch (e) {
+  console.error("Failed to load order for payment page:", e);
+}
+
+if (!order) {
+  // Invalid or missing order -> go back home
+  return Astro.redirect("/");
+}
+
+// 3. Generate QRIS Raw Data if payment is required
+let qrisRawData = "";
+if (order.finalTotalToPay > 0 && order.paymentStatus !== "approved") {
+  try {
+    qrisRawData = generateDynamicQRIS(
+       // Re-using the same BASE_QRIS from the Svelte store
+      "00020101021226680016ID.CO.SHOPEE.WWW01189360091800000282130215ID10243179261430303UMI51440014ID.CO.QRIS.WWW0215ID10243179261430303UMI5204581253033605802ID5911BUKBER 20266006SLEMAN61055528162070703A016304CA15", 
+      order.finalTotalToPay
+    );
+  } catch (e) {
+    console.error("QR Code Formatting Error:", e);
+  }
+}
+
+// 4. Helper formatting functions
+function formatRupiah(number: number): string {
+  return new Intl.NumberFormat("id-ID", {
+    style: "currency",
+    currency: "IDR",
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 0,
+  }).format(number);
+}
+
+// Layout states
+const isDone = order.paymentStatus === 'approved';
+const isPendingProof = order.paymentProofUrl && !isDone;
+const needsUpload = !order.paymentProofUrl && !isDone;
+---
+
+<html lang="id">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <title>Pembayaran Bukber 2026 - {order.userName}</title>
+    <!-- Favicon updated -->
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🌙</text></svg>">
+  </head>
+  <body class="bg-gray-50 min-h-screen font-sans selection:bg-emerald-200">
+    <!-- Navbar / Header Mobile Friendly -->
+    <header class="mesh-gradient shadow-md px-4 py-4 md:py-6 sticky top-0 z-50">
+        <div class="max-w-2xl mx-auto flex items-center justify-between">
+            <a href="/" class="flex items-center gap-2 group">
+                <span class="text-2xl drop-shadow-md group-hover:scale-110 transition-transform">🌙</span>
+                <span class="font-premium text-white font-bold text-lg md:text-xl drop-shadow-sm">Bukber <span class="text-amber-300 italic">2026</span></span>
+            </a>
+            <span class="text-[#0e4b38] bg-amber-300 text-xs md:text-sm font-bold px-3 py-1 bg-opacity-90 rounded-full shadow-sm border border-amber-200 uppercase tracking-widest whitespace-nowrap">
+                Invoice
+            </span>
+        </div>
+    </header>
+
+    <main class="max-w-2xl mx-auto px-4 py-6 md:py-10 pb-24">
+      
+      <!-- Status Banner -->
+      {isDone ? (
+        <div class="bg-emerald-100 border-l-4 border-emerald-500 text-emerald-800 p-4 rounded-r-xl shadow-sm mb-6 flex items-start sm:items-center gap-3 animate-fade-in-up">
+            <span class="text-2xl shrink-0">✅</span>
+            <div>
+                <h2 class="font-bold text-emerald-900">Pembayaran Lunas!</h2>
+                <p class="text-sm opacity-90 mt-0.5">Terima kasih, pembayaran untuk pesanan ini telah diverifikasi admin.</p>
+            </div>
+        </div>
+      ) : isPendingProof ? (
+        <div class="bg-amber-100 border-l-4 border-amber-500 text-amber-800 p-4 rounded-r-xl shadow-sm mb-6 flex items-start sm:items-center gap-3 animate-fade-in-up">
+            <span class="text-2xl shrink-0 animate-pulse">⏳</span>
+            <div>
+                <h2 class="font-bold text-amber-900">Pembayaran Sedang Diproses</h2>
+                <p class="text-sm opacity-90 mt-0.5">Sistem sedang melakukan validasi dana. Invoice akan otomatis diupdate.</p>
+            </div>
+        </div>
+      ) : null}
+
+      <!-- Main Card -->
+      <div class="bg-white rounded-3xl shadow-xl border border-gray-100 overflow-hidden mb-6 animate-fade-in-up" style="animation-delay: 100ms;">
+        
+        <!-- User Info -->
+        <div class="p-5 md:p-8 bg-gradient-to-br from-emerald-50 to-white border-b border-gray-100">
+            <h1 class="text-xl md:text-2xl font-bold text-gray-800 tracking-tight leading-tight">{order.userName}</h1>
+            <div class="flex flex-wrap items-center gap-x-4 gap-y-2 mt-2 text-sm text-gray-600 font-medium">
+                {order.userNIM && (
+                    <span class="inline-flex items-center gap-1.5"><span class="opacity-50">NIM:</span> {order.userNIM}</span>
+                )}
+                {order.studentNo > 0 && (
+                    <span class="inline-flex items-center gap-1.5"><span class="opacity-50">No.Urut:</span> <span class="bg-amber-100 text-amber-800 px-2 py-0.5 rounded text-xs font-bold">#{order.studentNo}</span></span>
+                )}
+            </div>
+        </div>
+
+        <!-- Order Summary -->
+        <div class="p-5 md:p-8 bg-gray-50/50">
+            <h3 class="text-xs font-bold text-gray-400 uppercase tracking-wider mb-4 border-b border-gray-200 pb-2">Ringkasan Pesanan</h3>
+            <ul class="space-y-4">
+                {order.items.map((item: any) => (
+                <li class="flex justify-between items-start gap-3">
+                    <div class="flex-1">
+                        <span class="font-bold text-gray-800 text-sm md:text-base">{item.name || item.menuName}</span>
+                        <!-- Variants -->
+                        {item.variants && Object.keys(item.variants).length > 0 && (
+                            <div class="text-[11px] md:text-xs text-emerald-700/80 font-medium bg-emerald-50 inline-block px-2 py-1 rounded mt-1">
+                                {[
+                                    item.variants.ayamPart, 
+                                    item.variants.ayamSauce ? `Saus ${item.variants.ayamSauce}` : '',
+                                    item.variants.katsuSauce ? `Saus ${item.variants.katsuSauce}` : '',
+                                    item.variants.squashFlavor ? `Squash ${item.variants.squashFlavor}` : '',
+                                    item.variants.sausMMB,
+                                    item.variants.level ? `Level ${item.variants.level}` : ''
+                                ].filter(Boolean).join(' • ')}
+                            </div>
+                        )}
+                        <!-- Addons -->
+                        {item.addons && item.addons.length > 0 && (
+                            <div class="text-[11px] md:text-xs text-amber-600 font-medium block mt-1">
+                                + {item.addons.map((a: any) => a.name).join(', ')}
+                            </div>
+                        )}
+                    </div>
+                    <div class="text-right shrink-0">
+                        <span class="font-bold text-gray-800 text-sm md:text-base">{formatRupiah(item.totalItemPrice || item.price)}</span>
+                        <div class="text-[11px] md:text-xs text-gray-400 font-semibold mt-1">x{item.quantity} </div>
+                    </div>
+                </li>
+                ))}
+            </ul>
+        </div>
+
+        <!-- Totals -->
+        <div class="p-5 md:p-8 bg-white border-t border-gray-100">
+            <div class="space-y-3 font-medium text-sm md:text-base">
+                <div class="flex justify-between text-gray-500">
+                    <span>Subtotal</span>
+                    <span>{formatRupiah(order.subTotal)}</span>
+                </div>
+                {order.subsidyApplied > 0 && (
+                <div class="flex justify-between text-amber-600">
+                    <span>Subsidi Bukber</span>
+                    <span>-{formatRupiah(order.subsidyApplied)}</span>
+                </div>
+                )}
+                <div class="h-px w-full bg-dashed border-t-2 border-dashed border-gray-200 my-2"></div>
+                <div class="flex flex-col sm:flex-row justify-between sm:items-end gap-2 pt-2">
+                    <span class="text-gray-500 font-bold uppercase tracking-wider text-xs">Total Pembayaran</span>
+                    <span class="text-3xl md:text-4xl font-black text-emerald-600 tracking-tight">{formatRupiah(order.finalTotalToPay)}</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Payment Actions -->
+        {needsUpload && order.finalTotalToPay > 0 && (
+        <div class="p-5 md:p-8 bg-emerald-50/50 border-t border-emerald-100">
+            <!-- QRIS Code Image -->
+            {qrisRawData && (
+            <div class="bg-white p-4 rounded-2xl shadow-sm border border-emerald-100 mb-6 flex flex-col items-center text-center">
+                <img src="/qris-logo.png" alt="QRIS" class="h-6 object-contain mb-3" onerror="this.style.display='none'" />
+                <QRCodeRenderer client:only="svelte" qrisRawData={qrisRawData} />
+                <p class="text-xs text-gray-500 max-w-[200px] leading-tight font-medium">Scan QR Code ini menggunakan aplikasi M-Banking atau E-Wallet pilihan Anda.</p>
+            </div>
+            )}
+
+            <UploadProof client:load orderId={order.id} finalTotalToPay={order.finalTotalToPay} />
+        </div>
+        )}
+        
+      </div>
+
+    </main>
+  </body>
+</html>

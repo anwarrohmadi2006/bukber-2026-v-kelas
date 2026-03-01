@@ -23,6 +23,7 @@ function createCartStore() {
       );
     },
     clear: () => set([]),
+    setItems: (items: CartItem[]) => set(items),
     getItems: () => get({ subscribe })
   };
 }
@@ -38,6 +39,7 @@ export const cart = createCartStore();
 export const userName = writable<string>('');
 export const userNIM = writable<string>('');
 export const studentNo = writable<number>(0);
+export const existingOrderId = writable<string | null>(null);
 
 // Dynamic subsidy amount store — fetched from API, default from menu.ts
 export const subsidyAmountStore = writable<number>(SUBSIDY_AMOUNT);
@@ -91,6 +93,8 @@ export const itemCount = derived(cart, $cart =>
 export function generateOrderPayload(): Order {
   return {
     userName: get(userName),
+    userNIM: get(userNIM),
+    studentNo: get(studentNo),
     items: get(cart),
     subTotal: get(subTotal),
     subsidyApplied: get(subsidyApplied),
@@ -104,4 +108,5 @@ export function resetOrder() {
   userName.set('');
   userNIM.set('');
   studentNo.set(0);
+  existingOrderId.set(null);
 }

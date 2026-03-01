@@ -39,10 +39,14 @@ export interface CartItem {
 export interface Order {
   id?: number;
   userName: string;
+  userNIM?: string;
+  studentNo?: number;
   items: CartItem[];
   subTotal: number;
   subsidyApplied: number;
   finalTotalToPay: number;
+  paymentProofUrl?: string;
+  paymentStatus?: 'pending' | 'approved';
   createdAt?: string;
 }
 

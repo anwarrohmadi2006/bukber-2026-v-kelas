@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount, tick } from "svelte";
+  import { onMount, tick, untrack } from "svelte";
   import {
     cart,
     userName,
@@ -12,6 +12,7 @@
     fetchSubsidyAmount,
     generateOrderPayload,
     resetOrder,
+    existingOrderId,
   } from "../lib/stores/cart";
   import {
     MENU_DATA,
@@ -21,27 +22,29 @@
     type MenuItem,
   } from "../lib/data/menu";
   import { findStudentByNIM } from "../lib/data/students";
-  import { generateDynamicQRIS } from "../lib/utils/qris";
-  import ItemModal from "./ItemModal.svelte";
   import CartBar from "./CartBar.svelte";
-  import QRCode from "qrcode";
+  import ItemModal from "./ItemModal.svelte";
+
+  let { initialSubsidy = 30000 }: { initialSubsidy?: number } = $props();
+
+  // Initialize seamlessly from SSR prop before the first paint
+  // We use untrack to signal to Svelte 5 that capturing only the initial value is intentional
+  subsidyAmountStore.set(untrack(() => initialSubsidy));
 
   const BASE_QRIS =
     "00020101021126610014COM.GO-JEK.WWW01189360091434963481800210G4963481800303UMI51440014ID.CO.QRIS.WWW0215ID10264841120850303UMI5204829953033605802ID5919HMPS Sains Data UIN6009SUKOHARJO61055716862070703A0163046730";
 
   onMount(() => {
+    // Optionally refetch just in case it modified while user had page cached
     fetchSubsidyAmount();
   });
 
   let selectedItem = $state<MenuItem | null>(null);
-  let showSuccess = $state(false);
   let isSubmitting = $state(false);
-  let orderResult = $state<{
-    finalTotalToPay: number;
-    orderId?: number;
-    qrisData?: string;
-  } | null>(null);
-  let qrCanvas = $state<HTMLCanvasElement | null>(null);
+
+  // Edit order state
+  let existingOrderToEdit = $state<any>(null);
+  let isCheckingOrder = $state(false);
 
   const bukberCategories = getBukberCategories();
   const regularCategories = getRegularCategories();
@@ -53,29 +56,48 @@
       if (student) {
         $userName = student.nama;
         $studentNo = student.no;
+        if (!$existingOrderId) {
+          checkExistingOrder($userNIM);
+        }
       } else {
         $userName = "";
         $studentNo = 0;
+        existingOrderToEdit = null;
       }
     } else {
       $userName = "";
       $studentNo = 0;
+      existingOrderToEdit = null;
     }
   });
 
-  // Watch success modal and canvas to render QR
-  $effect(() => {
-    if (showSuccess && orderResult?.qrisData && qrCanvas) {
-      QRCode.toCanvas(qrCanvas, orderResult.qrisData, {
-        width: 256,
-        margin: 2,
-        color: {
-          dark: "#064e3b",
-          light: "#ffffff",
-        },
-      });
+  async function checkExistingOrder(nim: string) {
+    if (isCheckingOrder) return;
+    isCheckingOrder = true;
+    try {
+      const res = await fetch(`/api/orders?nim=${nim}`);
+      if (res.ok) {
+        const data = await res.json();
+        if (data.orders && data.orders.length > 0) {
+          existingOrderToEdit = data.orders[0];
+        } else {
+          existingOrderToEdit = null;
+        }
+      }
+    } catch (e) {
+      console.error("Failed to check existing order", e);
+    } finally {
+      isCheckingOrder = false;
     }
-  });
+  }
+
+  function loadExistingOrder() {
+    if (existingOrderToEdit) {
+      cart.setItems(existingOrderToEdit.items);
+      $existingOrderId = existingOrderToEdit.id;
+      existingOrderToEdit = null;
+    }
+  }
 
   function selectItem(item: MenuItem) {
     selectedItem = item;
@@ -95,12 +117,19 @@
     const payload = generateOrderPayload();
 
     try {
-      const response = await fetch("/api/orders", {
-        method: "POST",
+      const isEditing = !!$existingOrderId;
+      const url = "/api/orders";
+      const method = isEditing ? "PUT" : "POST";
+      const bodyPayload = isEditing
+        ? { ...payload, id: $existingOrderId }
+        : payload;
+
+      const response = await fetch(url, {
+        method,
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify(payload),
+        body: JSON.stringify(bodyPayload),
       });
 
       if (!response.ok) {
@@ -109,30 +138,18 @@
 
       const result = await response.json();
 
-      let qrisData = "";
-      if (payload.finalTotalToPay > 0) {
-        qrisData = generateDynamicQRIS(BASE_QRIS, payload.finalTotalToPay);
-      }
+      const responseOrderId = isEditing ? $existingOrderId : result.id;
 
-      orderResult = {
-        finalTotalToPay: payload.finalTotalToPay,
-        orderId: result.id,
-        qrisData,
-      };
-
-      showSuccess = true;
+      existingOrderToEdit = null;
       resetOrder();
+
+      // Redirect to dedicated payment page
+      window.location.href = `/payment/${responseOrderId}`;
     } catch (error) {
       console.error("Error submitting order:", error);
       alert("Gagal mengirim pesanan. Silakan coba lagi.");
-    } finally {
       isSubmitting = false;
     }
-  }
-
-  function closeSuccess() {
-    showSuccess = false;
-    orderResult = null;
   }
 </script>
 
@@ -171,23 +188,28 @@
       ></div>
 
       {#if $subsidyAmountStore > 0}
-        <p
-          class="text-emerald-50 text-lg font-light max-w-md mx-auto leading-relaxed mb-6"
-        >
-          Rayakan kebersamaan di bulan suci dengan pilihan menu terbaik dari
-          kami.
-        </p>
-
         <div
-          class="bg-gradient-to-r from-amber-500 to-amber-600 rounded-full px-6 py-2 inline-flex items-center gap-2 shadow-lg border border-amber-400/50 hover:scale-105 transition-transform cursor-default"
+          class="transition-all duration-700 ease-in-out opacity-100 transform translate-y-0"
         >
-          <span class="text-amber-950 font-bold text-sm tracking-wide uppercase"
-            >Special Offer</span
+          <p
+            class="text-emerald-50 text-lg font-light max-w-md mx-auto leading-relaxed mb-6"
           >
-          <div class="w-1 h-1 rounded-full bg-amber-950/30"></div>
-          <span class="text-white font-semibold"
-            >Subsidi {formatRupiah($subsidyAmountStore)} per orang</span
+            Rayakan kebersamaan di bulan suci dengan pilihan menu terbaik dari
+            kami.
+          </p>
+
+          <div
+            class="bg-gradient-to-r from-amber-500 to-amber-600 rounded-full px-6 py-2 inline-flex items-center gap-2 shadow-lg border border-amber-400/50 hover:scale-105 transition-transform cursor-default"
           >
+            <span
+              class="text-amber-950 font-bold text-sm tracking-wide uppercase"
+              >Special Offer</span
+            >
+            <div class="w-1 h-1 rounded-full bg-amber-950/30"></div>
+            <span class="text-white font-semibold"
+              >Subsidi {formatRupiah($subsidyAmountStore)} per orang</span
+            >
+          </div>
         </div>
       {/if}
     </div>
@@ -198,9 +220,23 @@
     <div
       class="bg-white rounded-2xl shadow-md p-6 mb-6 border border-emerald-100"
     >
-      <div class="flex items-center gap-2 mb-4">
-        <span class="text-xl">🪪</span>
-        <h2 class="text-lg font-bold text-gray-800">Identitas Pemesan</h2>
+      <div class="flex flex-wrap items-center justify-between gap-4 mb-4">
+        <div class="flex items-center gap-2">
+          <span class="text-xl">🪪</span>
+          <h2 class="text-lg font-bold text-gray-800">Identitas Pemesan</h2>
+        </div>
+        {#if $userNIM || $cart.length > 0}
+          <button
+            type="button"
+            onclick={() => {
+              if (confirm("Apakah kamu yakin ingin mereset form pesanan?"))
+                resetOrder();
+            }}
+            class="text-xs text-red-600 hover:text-red-700 font-semibold px-3 py-1.5 rounded-lg bg-red-50 hover:bg-red-100 transition-colors shadow-sm"
+          >
+            Reset Form
+          </button>
+        {/if}
       </div>
 
       <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -219,6 +255,42 @@
             class="w-full px-4 py-3 rounded-xl border-2 border-gray-100 focus:border-emerald-500 focus:outline-none transition-colors font-mono"
             maxlength="10"
           />
+          {#if existingOrderToEdit && !$existingOrderId}
+            <div
+              class="mt-3 p-3 bg-blue-50 border border-blue-200 rounded-xl relative overflow-hidden flex items-start sm:items-center justify-between gap-3 shadow-sm transition-all animate-fade-in-up group hover:shadow-md hover:border-blue-300"
+            >
+              <div class="absolute left-0 top-0 bottom-0 w-1 bg-blue-500"></div>
+              <div class="pl-2">
+                <p
+                  class="text-xs font-semibold text-blue-800 flex items-center gap-1.5"
+                >
+                  <span class="text-base">📋</span> Pesanan Ditemukan!
+                </p>
+                <p
+                  class="text-[11px] text-blue-600/90 mt-0.5 max-w-[200px] leading-tight font-medium"
+                >
+                  Kamu sudah pernah memesan paket bukber.
+                </p>
+              </div>
+              <button
+                type="button"
+                onclick={loadExistingOrder}
+                class="shrink-0 text-xs font-bold px-4 py-2 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white rounded-lg transition-transform focus:ring-2 focus:ring-blue-400 focus:ring-offset-2 focus:ring-offset-blue-50 active:scale-95 shadow-sm"
+              >
+                Edit Pesanan
+              </button>
+            </div>
+          {/if}
+          {#if $existingOrderId}
+            <p
+              class="mt-2 text-xs font-medium text-amber-600 flex items-center gap-1"
+            >
+              <span
+                class="inline-block w-2 h-2 rounded-full bg-amber-500 animate-pulse"
+              ></span>
+              Mode Edit Pesanan Aktif
+            </p>
+          {/if}
         </div>
 
         <div>
@@ -375,84 +447,7 @@
   <!-- Cart Bar -->
   <CartBar onCheckout={handleCheckout} />
 
-  <!-- Success Modal & QRIS -->
-  {#if showSuccess && orderResult}
-    <div
-      class="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4 overflow-y-auto"
-    >
-      <div
-        class="bg-white rounded-3xl w-full max-w-sm p-6 text-center my-auto shadow-2xl border border-emerald-100"
-      >
-        <div class="text-5xl mb-4 animate-bounce">✅</div>
-        <h3 class="text-2xl font-bold text-emerald-800 mb-1">
-          Pesanan Berhasil!
-        </h3>
-        <p class="text-gray-500 text-sm mb-6">
-          Terima kasih, <span class="font-bold text-gray-800">{$userName}</span
-          >. Pesanan kamu telah tercatat.
-        </p>
-
-        {#if orderResult.finalTotalToPay > 0}
-          <div
-            class="bg-emerald-900 rounded-2xl p-6 mb-6 text-white shadow-inner relative overflow-hidden"
-          >
-            <!-- Background Decoration -->
-            <div
-              class="absolute -right-4 -bottom-4 text-white/5 text-8xl font-black"
-            >
-              QRIS
-            </div>
-
-            <p
-              class="text-emerald-200 text-xs font-bold uppercase tracking-widest mb-2"
-            >
-              Total Pembayaran Unik
-            </p>
-            <p
-              class="text-3xl font-black text-amber-400 mb-1 leading-none font-mono"
-            >
-              {formatRupiah(orderResult.finalTotalToPay)}
-            </p>
-            <p class="text-[10px] text-emerald-300 italic opacity-80">
-              *Termasuk kode pesanan No. {$studentNo}
-            </p>
-
-            <div class="mt-6 bg-white p-3 rounded-xl inline-block shadow-lg">
-              <canvas bind:this={qrCanvas} class="mx-auto block"></canvas>
-            </div>
-
-            <div class="mt-4 space-y-2 text-left">
-              <p class="text-[10px] leading-tight text-white/90">
-                1. Buka aplikasi M-Banking/E-Wallet (Dana, OVO, dll)
-              </p>
-              <p class="text-[10px] leading-tight text-white/90">
-                2. Scan kode QR di atas
-              </p>
-              <p class="text-[10px] leading-tight text-amber-300 font-bold">
-                3. Pastikan nominal transfer sama persis!
-              </p>
-            </div>
-          </div>
-        {:else}
-          <div
-            class="bg-gradient-to-br from-emerald-100 to-emerald-200 rounded-2xl p-6 mb-6"
-          >
-            <p class="text-3xl font-black text-emerald-700 mb-1">GRATIS!</p>
-            <p class="text-sm text-emerald-800 font-medium">
-              Pesanan kamu sepenuhnya ditanggung subsidi kelas.
-            </p>
-          </div>
-        {/if}
-
-        <button
-          onclick={closeSuccess}
-          class="w-full py-4 bg-emerald-600 text-white rounded-2xl font-bold shadow-lg hover:bg-emerald-700 active:scale-95 transition-all text-lg"
-        >
-          Selesai & Tutup
-        </button>
-      </div>
-    </div>
-  {/if}
+  <CartBar onCheckout={handleCheckout} />
 
   <!-- Loading Overlay -->
   {#if isSubmitting}
