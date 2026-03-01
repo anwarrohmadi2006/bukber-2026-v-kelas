@@ -1,0 +1,27 @@
+{
+	"name": "bukber-2026",
+	"pages_build_output_dir": "dist",
+	"compatibility_date": "2026-02-26",
+	"compatibility_flags": [
+		"nodejs_compat",
+		"global_fetch_strictly_public"
+	],
+
+	"observability": {
+		"enabled": true
+	},
+	"kv_namespaces": [
+		{
+			"binding": "SESSION",
+			"id": "49142fbac5e94f37b495d82ffa61518b"
+		}
+	],
+	"d1_databases": [
+		{
+			"binding": "DB",
+			"database_name": "bukber-orders",
+			"database_id": "52fbfbfe-da22-47cf-bbf7-30922781a41d",
+			"migrations_dir": "migrations"
+		}
+	]
+}

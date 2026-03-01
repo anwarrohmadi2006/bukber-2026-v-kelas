@@ -1,0 +1,31 @@
+---
+import "../styles/global.css";
+import AdminPanel from "../components/AdminPanel.svelte";
+import { requireAdminAuth } from "../lib/middleware/adminAuth";
+
+export const prerender = false;
+
+// Check authentication
+const isAuthenticated = await requireAdminAuth({
+  request: Astro.request,
+  locals: Astro.locals,
+});
+
+if (!isAuthenticated) {
+  return Astro.redirect("/admin/login");
+}
+---
+
+<!doctype html>
+<html lang="id">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="Admin - Rekap Pesanan Bukber 2026" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <title>Admin - Bukber 2026</title>
+  </head>
+  <body>
+    <AdminPanel client:load />
+  </body>
+</html>

@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
+  <!-- Background circle -->
+  <circle cx="64" cy="64" r="60" fill="#059669"/>
+  
+  <!-- Crescent moon -->
+  <path d="M75 20c-20 0-36 16-36 36s16 36 36 36c6 0 11.5-1.5 16.5-4-6.5 8-16.5 13-27.5 13-20 0-36-16-36-36s16-36 36-36c11 0 21 5 27.5 13-5-2.5-10.5-4-16.5-4z" fill="#fbbf24"/>
+  
+  <!-- Plate/bowl -->
+  <ellipse cx="64" cy="95" rx="30" ry="8" fill="#fef3c7"/>
+  <ellipse cx="64" cy="93" rx="26" ry="6" fill="#fde68a"/>
+  
+  <!-- Food on plate (chicken leg) -->
+  <path d="M54 85c0-4 3-8 10-8s10 4 10 8c0 2-2 4-5 5l2 3c1 1 0 2-1 2h-12c-1 0-2-1-1-2l2-3c-3-1-5-3-5-5z" fill="#92400e"/>
+  <circle cx="64" cy="82" r="6" fill="#b45309"/>
+  
+  <!-- Steam lines -->
+  <path d="M55 75c0-3 2-5 2-8" stroke="#fff" stroke-width="2" stroke-linecap="round" fill="none" opacity="0.6"/>
+  <path d="M64 73c0-3 0-5 0-8" stroke="#fff" stroke-width="2" stroke-linecap="round" fill="none" opacity="0.6"/>
+  <path d="M73 75c0-3-2-5-2-8" stroke="#fff" stroke-width="2" stroke-linecap="round" fill="none" opacity="0.6"/>
+  
+  <!-- Stars -->
+  <circle cx="95" cy="35" r="2" fill="#fbbf24"/>
+  <circle cx="105" cy="50" r="1.5" fill="#fbbf24"/>
+  <circle cx="100" cy="25" r="1" fill="#fbbf24"/>
+</svg>

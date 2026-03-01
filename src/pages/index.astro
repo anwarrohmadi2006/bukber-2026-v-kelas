@@ -1,0 +1,27 @@
+---
+import "../styles/global.css";
+import OrderForm from "../components/OrderForm.svelte";
+---
+
+<!doctype html>
+<html lang="id">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      name="description"
+      content="Pemesanan Makanan Bukber 2026 - Pengalaman Kuliner Ramadhan yang Berkesan"
+    />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=Playfair+Display:ital,wght@0,400..900;1,400..900&display=swap"
+      rel="stylesheet"
+    />
+    <title>Bukber 2026 | Official Catering & Menu Selection</title>
+  </head>
+  <body>
+    <OrderForm client:load />
+  </body>
+</html>
