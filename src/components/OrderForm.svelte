@@ -9,10 +9,11 @@
     subsidyApplied,
     finalTotalToPay,
     subsidyAmountStore,
-    fetchSubsidyAmount,
     generateOrderPayload,
     resetOrder,
     existingOrderId,
+    orderNote,
+    fetchSubsidyAmount,
   } from "../lib/stores/cart";
   import {
     MENU_DATA,
@@ -21,7 +22,6 @@
     formatRupiah,
     type MenuItem,
   } from "../lib/data/menu";
-  import { findStudentByNIM } from "../lib/data/students";
   import CartBar from "./CartBar.svelte";
   import ItemModal from "./ItemModal.svelte";
 
@@ -49,21 +49,33 @@
   const bukberCategories = getBukberCategories();
   const regularCategories = getRegularCategories();
 
+  let studentCheckTimeout: ReturnType<typeof setTimeout>;
+
   // Watch NIM changes to lookup student
   $effect(() => {
     if ($userNIM.length >= 8) {
-      const student = findStudentByNIM($userNIM);
-      if (student) {
-        $userName = student.nama;
-        $studentNo = student.no;
-        if (!$existingOrderId) {
-          checkExistingOrder($userNIM);
+      clearTimeout(studentCheckTimeout);
+      studentCheckTimeout = setTimeout(async () => {
+        try {
+          const res = await fetch(`/api/students?nim=${$userNIM}`);
+          if (res.ok) {
+            const student = await res.json();
+            $userName = student.nama;
+            $studentNo = student.no;
+            if (!$existingOrderId) {
+              checkExistingOrder($userNIM);
+            }
+          } else {
+            $userName = "";
+            $studentNo = 0;
+            existingOrderToEdit = null;
+          }
+        } catch (e) {
+          $userName = "";
+          $studentNo = 0;
+          existingOrderToEdit = null;
         }
-      } else {
-        $userName = "";
-        $studentNo = 0;
-        existingOrderToEdit = null;
-      }
+      }, 500); // 500ms debounce
     } else {
       $userName = "";
       $studentNo = 0;
@@ -95,6 +107,7 @@
     if (existingOrderToEdit) {
       cart.setItems(existingOrderToEdit.items);
       $existingOrderId = existingOrderToEdit.id;
+      $orderNote = existingOrderToEdit.note || "";
       existingOrderToEdit = null;
     }
   }
@@ -327,6 +340,24 @@
           Mahasiswa terverifikasi (No. Urut: {$studentNo})
         </p>
       {/if}
+
+      <div class="mt-4 pt-4 border-t border-gray-100">
+        <label
+          class="block text-sm font-semibold text-gray-700 mb-2"
+          for="orderNote"
+        >
+          Catatan Tambahan <span class="text-gray-400 font-normal"
+            >(Opsional)</span
+          >
+        </label>
+        <textarea
+          id="orderNote"
+          bind:value={$orderNote}
+          rows="2"
+          placeholder="Contoh: Es Tehnya manis ya kak, Sambalnya dipisah..."
+          class="w-full px-4 py-3 rounded-xl border-2 border-gray-100 focus:border-emerald-500 focus:outline-none transition-colors text-sm resize-none"
+        ></textarea>
+      </div>
     </div>
 
     <!-- Bukber Special Packages -->

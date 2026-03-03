@@ -22,5 +22,8 @@
     "tailwindcss": "^4.2.1",
     "typescript": "^5.9.3",
     "xlsx": "^0.18.5"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20260301.1"
   }
 }

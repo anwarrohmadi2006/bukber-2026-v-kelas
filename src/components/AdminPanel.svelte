@@ -14,6 +14,7 @@
     finalTotalToPay: number;
     paymentProofUrl?: string;
     paymentStatus?: "pending" | "approved";
+    note?: string;
     createdAt: string;
   }
 
@@ -23,13 +24,25 @@
     totalRevenue: number;
   }
 
+  interface Student {
+    id?: number;
+    no: number;
+    nama: string;
+    nim: string;
+    created_at?: string;
+  }
+
   let orders = $state<Order[]>([]);
+  let students = $state<Student[]>([]);
   let loading = $state(true);
   let error = $state<string | null>(null);
-  let activeTab = $state<"orders" | "stats">("orders");
-  let viewingImageUrl = $state<string | null>(null);
+  let activeTab = $state<"orders" | "stats" | "students">("orders");
+  let viewingImageUrl = $state<string | null | undefined>(null);
   let isAdminMode = $state(true);
   let editingOrder = $state<Order | null>(null);
+  let editingStudent = $state<(Student & { originalNim?: string }) | null>(
+    null,
+  );
   let subsidyAmount = $state(30000);
   let savingSubsidy = $state(false);
 
@@ -75,12 +88,14 @@
 
   onMount(async () => {
     // Component is only accessible by admin now
-    await Promise.all([fetchOrders(true), fetchSubsidy()]);
+    await Promise.all([fetchOrders(true), fetchSubsidy(), fetchStudents()]);
   });
 
   async function fetchSubsidy() {
     try {
-      const response = await fetch("/api/settings");
+      const response = await fetch("/api/settings", {
+        credentials: "include",
+      });
       if (response.ok) {
         const data = await response.json();
         if (data.subsidyAmount !== undefined) {
@@ -98,6 +113,7 @@
       const response = await fetch("/api/settings", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
+        credentials: "include",
         body: JSON.stringify({ subsidyAmount }),
       });
       if (!response.ok) {
@@ -123,7 +139,9 @@
     error = null;
     try {
       const url = adminMode ? "/api/orders?admin=true" : "/api/orders";
-      const response = await fetch(url);
+      const response = await fetch(url, {
+        credentials: "include",
+      });
       if (!response.ok) {
         if (response.status === 401) {
           error = "Sesi admin telah habis. Silakan login kembali.";
@@ -141,6 +159,90 @@
     }
   }
 
+  async function fetchStudents() {
+    try {
+      const response = await fetch("/api/students", {
+        credentials: "include",
+      });
+      if (response.ok) {
+        const data = await response.json();
+        students = data.students || [];
+      }
+    } catch (e) {
+      console.error("Failed to fetch students:", e);
+    }
+  }
+
+  async function handleImportExcel(event: Event) {
+    const input = event.target as HTMLInputElement;
+    if (!input.files || input.files.length === 0) return;
+
+    const file = input.files[0];
+    const reader = new FileReader();
+
+    reader.onload = async (e) => {
+      try {
+        loading = true;
+        const data = new Uint8Array(e.target?.result as ArrayBuffer);
+        const workbook = XLSX.read(data, { type: "array" });
+
+        // Assume first sheet
+        const firstSheetName = workbook.SheetNames[0];
+        const worksheet = workbook.Sheets[firstSheetName];
+
+        // Convert to JSON
+        const rawData = XLSX.utils.sheet_to_json<any>(worksheet);
+
+        // Map to our Student format
+        const importedStudents: Student[] = rawData
+          .map((row: any, index: number) => {
+            return {
+              no: Number(row["No"] || row["No."] || row["no"] || index + 1),
+              nama: String(row["Nama"] || row["nama"] || ""),
+              nim: String(row["NIM"] || row["nim"] || ""),
+            };
+          })
+          .filter((s) => s.nama && s.nim); // filter out empty rows
+
+        if (importedStudents.length === 0) {
+          throw new Error("Tidak menemukan data yang valid di file Excel.");
+        }
+
+        if (
+          !confirm(
+            `Ditemukan ${importedStudents.length} mahasiswa dalam file. Apakah Anda yakin ingin mengimpor data ini? Data yang lama akan digantikan.`,
+          )
+        ) {
+          loading = false;
+          input.value = ""; // clear input
+          return;
+        }
+
+        const response = await fetch("/api/students/import", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+          body: JSON.stringify({ students: importedStudents }),
+        });
+
+        if (!response.ok) {
+          const resError = await response.json();
+          throw new Error(resError.error || "Gagal mengimpor data");
+        }
+
+        alert(`Berhasil mengimpor ${importedStudents.length} mahasiswa.`);
+        await fetchStudents(); // Refresh list
+      } catch (err: any) {
+        alert("Gagal mengimpor file: " + err.message);
+      } finally {
+        loading = false;
+        input.value = ""; // clear input
+      }
+    };
+
+    reader.readAsArrayBuffer(file);
+  }
+
   async function deleteOrder(orderId: number) {
     if (!confirm("Apakah Anda yakin ingin menghapus pesanan ini?")) return;
 
@@ -150,6 +252,7 @@
         headers: {
           "Content-Type": "application/json",
         },
+        credentials: "include",
       });
 
       if (!response.ok) {
@@ -179,6 +282,7 @@
         headers: {
           "Content-Type": "application/json",
         },
+        credentials: "include",
         body: JSON.stringify({ ...order, paymentStatus: "approved" }),
       });
 
@@ -209,6 +313,7 @@
         headers: {
           "Content-Type": "application/json",
         },
+        credentials: "include",
         body: JSON.stringify(editingOrder),
       });
 
@@ -238,6 +343,56 @@
     } catch (e) {
       error = e instanceof Error ? e.message : "Unknown error";
       alert("Gagal memperbarui pesanan: " + error);
+    }
+  }
+
+  function startEditingStudent(student: Student) {
+    editingStudent = { ...student, originalNim: student.nim };
+  }
+
+  function cancelEditingStudent() {
+    editingStudent = null;
+  }
+
+  async function saveEditedStudent() {
+    if (!editingStudent) return;
+
+    try {
+      const response = await fetch("/api/students", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify(editingStudent),
+      });
+
+      if (!response.ok) {
+        if (response.status === 401) {
+          error = "Sesi admin telah habis. Silakan login kembali.";
+          window.location.href = "/admin/login";
+          return;
+        }
+        const errData = await response.json().catch(() => ({}));
+        throw new Error(errData.error || "Failed to update student");
+      }
+
+      // Update the student in the list locally
+      const index = students.findIndex(
+        (s) => s.nim === editingStudent!.originalNim,
+      );
+      if (index !== -1) {
+        students[index] = {
+          no: editingStudent.no,
+          nama: editingStudent.nama,
+          nim: editingStudent.nim,
+        };
+      }
+
+      editingStudent = null;
+      alert("Data mahasiswa berhasil diperbarui");
+    } catch (e) {
+      alert(
+        "Gagal memperbarui mahasiswa: " + (e instanceof Error ? e.message : e),
+      );
     }
   }
 
@@ -298,6 +453,7 @@
         headers: {
           "Content-Type": "application/json",
         },
+        credentials: "include",
       });
 
       if (!response.ok) {
@@ -342,6 +498,7 @@
         Menu: item.name,
         Varian: getVariantText(item) || "-",
         Tambahan: item.addons.map((a) => a.name).join(", ") || "-",
+        Catatan: order.note || "-",
         Qty: item.quantity,
         "Harga Item": item.totalItemPrice,
         "Subtotal Pesanan": order.subTotal,
@@ -569,6 +726,17 @@
       >
         Statistik Menu
       </button>
+      {#if isAdminMode}
+        <button
+          onclick={() => (activeTab = "students")}
+          class="px-4 py-2 rounded-lg font-medium transition-colors {activeTab ===
+          'students'
+            ? 'bg-emerald-600 text-white'
+            : 'bg-white text-gray-600 hover:bg-gray-50'}"
+        >
+          Daftar Mahasiswa
+        </button>
+      {/if}
     </div>
 
     <!-- Error Message -->
@@ -581,7 +749,176 @@
     {/if}
 
     <!-- Tab Content -->
-    {#if activeTab === "stats"}
+    {#if activeTab === "orders"}
+      <div class="space-y-4">
+        {#if loading}
+          <div
+            class="p-8 text-center bg-white rounded-xl shadow-sm text-gray-500"
+          >
+            <span class="animate-spin inline-block mr-2">&#8635;</span> Memuat data
+            pesanan...
+          </div>
+        {:else if orders.length === 0}
+          <div
+            class="p-8 text-center bg-white rounded-xl shadow-sm border border-dashed border-gray-200"
+          >
+            <p class="text-gray-500">Belum ada pesanan yang masuk.</p>
+          </div>
+        {:else}
+          {#each orders as order (order.id)}
+            <div
+              class="bg-white rounded-xl shadow-sm overflow-hidden flex flex-col md:flex-row border border-gray-100"
+            >
+              <!-- Order Details -->
+              <div
+                class="p-5 flex-1 border-b md:border-b-0 md:border-r border-gray-100"
+              >
+                <div class="flex justify-between items-start mb-3">
+                  <div>
+                    <h3 class="font-bold text-lg text-gray-800">
+                      {order.userName}
+                    </h3>
+                    <p class="text-sm text-gray-500">
+                      NIM: {order.userNIM || "-"} | No: {order.studentNo || "-"}
+                    </p>
+                  </div>
+                  <div class="text-right">
+                    <span class="text-xs text-gray-400 block"
+                      >{formatDate(order.createdAt)}</span
+                    >
+                    <span
+                      class="inline-block mt-1 px-3 py-1 text-xs font-bold rounded-full {order.paymentStatus ===
+                      'approved'
+                        ? 'bg-emerald-100 text-emerald-700'
+                        : 'bg-amber-100 text-amber-700'}"
+                    >
+                      {order.paymentStatus === "approved"
+                        ? "Lunas"
+                        : "Menunggu"}
+                    </span>
+                  </div>
+                </div>
+
+                <!-- Items list -->
+                <div class="bg-gray-50 rounded-lg p-3 text-sm space-y-2 mb-3">
+                  {#each order.items as item}
+                    <div class="flex justify-between items-start">
+                      <div>
+                        <span class="font-semibold text-gray-700"
+                          >{item.quantity}x {item.name}</span
+                        >
+                        <p class="text-xs text-gray-500 mt-1">
+                          {getVariantText(item)}
+                        </p>
+                        {#if item.addons && item.addons.length > 0}
+                          <p class="text-xs text-emerald-600 mt-0.5">
+                            + {item.addons.map((a) => a.name).join(", ")}
+                          </p>
+                        {/if}
+                      </div>
+                      <span class="font-medium text-gray-700"
+                        >{formatRupiah(item.totalItemPrice)}</span
+                      >
+                    </div>
+                  {/each}
+                </div>
+
+                {#if order.note}
+                  <div
+                    class="bg-amber-50 rounded-lg p-3 text-sm border border-amber-100"
+                  >
+                    <span
+                      class="font-bold text-amber-800 text-xs uppercase tracking-wider block mb-1"
+                      >Catatan:</span
+                    >
+                    <p class="text-amber-900">{order.note}</p>
+                  </div>
+                {/if}
+              </div>
+
+              <!-- Payment & Actions -->
+              <div class="p-5 md:w-64 bg-gray-50 flex flex-col justify-between">
+                <div>
+                  <div class="flex justify-between text-sm mb-1">
+                    <span class="text-gray-500">Subtotal</span>
+                    <span class="text-gray-700"
+                      >{formatRupiah(order.subTotal)}</span
+                    >
+                  </div>
+                  <div class="flex justify-between text-sm mb-1">
+                    <span class="text-gray-500">Subsidi</span>
+                    <span class="text-emerald-600"
+                      >-{formatRupiah(order.subsidyApplied)}</span
+                    >
+                  </div>
+                  <div
+                    class="flex justify-between font-bold text-lg mt-2 pt-2 border-t border-gray-200"
+                  >
+                    <span class="text-gray-800">Total</span>
+                    <span class="text-emerald-700"
+                      >{formatRupiah(order.finalTotalToPay)}</span
+                    >
+                  </div>
+                </div>
+
+                <div class="mt-4 space-y-2">
+                  {#if order.paymentProofUrl}
+                    <button
+                      onclick={() => (viewingImageUrl = order.paymentProofUrl)}
+                      class="w-full bg-blue-100 hover:bg-blue-200 text-blue-700 py-2 px-3 rounded-lg text-sm font-medium transition-colors flex items-center justify-center gap-2"
+                    >
+                      <svg
+                        class="w-4 h-4"
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
+                        ><path
+                          stroke-linecap="round"
+                          stroke-linejoin="round"
+                          stroke-width="2"
+                          d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
+                        ></path><path
+                          stroke-linecap="round"
+                          stroke-linejoin="round"
+                          stroke-width="2"
+                          d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"
+                        ></path></svg
+                      >
+                      <span>Lihat Bukti Bayar</span>
+                    </button>
+                  {/if}
+
+                  {#if isAdminMode}
+                    {#if order.paymentStatus !== "approved"}
+                      <button
+                        onclick={() => approvePayment(order)}
+                        class="w-full bg-emerald-600 hover:bg-emerald-700 text-white py-2 px-3 rounded-lg text-sm font-bold transition-colors"
+                      >
+                        Verifikasi Lunas
+                      </button>
+                    {/if}
+                    <div class="flex gap-2">
+                      <button
+                        onclick={() => startEditingOrder(order)}
+                        class="flex-1 bg-white border border-gray-300 hover:bg-gray-50 py-2 px-3 rounded-lg text-sm font-medium transition-colors"
+                      >
+                        Edit
+                      </button>
+                      <button
+                        onclick={() => deleteOrder(order.id)}
+                        class="flex-1 bg-white border border-rose-300 text-rose-600 hover:bg-rose-50 py-2 px-3 rounded-lg text-sm font-medium transition-colors"
+                      >
+                        Hapus
+                      </button>
+                    </div>
+                  {/if}
+                </div>
+              </div>
+            </div>
+          {/each}
+        {/if}
+      </div>
+    {:else if activeTab === "stats"}
       <!-- Statistics View -->
       <div class="bg-white rounded-xl shadow-sm overflow-hidden">
         <div
@@ -657,205 +994,106 @@
           </div>
         {/if}
       </div>
-    {:else}
-      <!-- Orders List -->
-      {#if loading && orders.length === 0}
-        <div class="bg-white rounded-xl p-8 text-center">
-          <div
-            class="animate-spin w-8 h-8 border-4 border-emerald-500 border-t-transparent rounded-full mx-auto mb-4"
-          ></div>
-          <p class="text-gray-500">Memuat data pesanan...</p>
-        </div>
-      {:else if orders.length === 0}
-        <div class="bg-white rounded-xl p-8 text-center">
-          <div class="text-4xl mb-4">&#128466;</div>
-          <p class="text-gray-500">Belum ada pesanan</p>
-        </div>
-      {:else}
-        <div class="space-y-4">
-          {#each orders as order (order.id)}
-            <div class="bg-white rounded-xl shadow-sm overflow-hidden">
-              <!-- Order Header -->
-              <div
-                class="bg-gradient-to-r from-emerald-50 to-amber-50 px-4 py-3 border-b"
+    {:else if activeTab === "students" && isAdminMode}
+      <!-- Students Management View -->
+      <div class="bg-white rounded-xl shadow-sm overflow-hidden p-6">
+        <div
+          class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6"
+        >
+          <div>
+            <h2 class="font-bold text-gray-800 text-lg">
+              Daftar Mahasiswa / Undangan
+            </h2>
+            <p class="text-sm text-gray-500">
+              Total: {students.length} orang terdaftar
+            </p>
+          </div>
+
+          <div class="w-full sm:w-auto flex flex-col sm:flex-row gap-2">
+            <label
+              class="relative cursor-pointer w-full sm:w-auto bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg transition-colors flex items-center justify-center gap-2 shadow-sm font-medium"
+            >
+              <svg
+                class="w-5 h-5"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+                ><path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="2"
+                  d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"
+                ></path></svg
               >
-                <div
-                  class="flex flex-col sm:flex-row sm:items-center justify-between gap-3"
-                >
-                  <div>
-                    <h3 class="font-bold text-gray-800 text-lg">
-                      {order.userName}
-                      {#if order.userNIM}
-                        <span
-                          class="text-xs font-bold text-emerald-700 bg-emerald-100/50 px-2 py-0.5 rounded ml-2"
-                        >
-                          #{order.userNIM}
-                        </span>
-                      {/if}
-                    </h3>
-                    <div
-                      class="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-gray-500 mt-1 font-medium"
-                    >
-                      <span>{formatDate(order.createdAt)}</span>
-                      {#if order.studentNo}
-                        <span
-                          class="bg-amber-100 text-amber-800 px-1.5 py-0.5 rounded font-bold"
-                          >No. Urut: {order.studentNo}</span
-                        >
-                      {/if}
-                    </div>
-                    <div class="mt-3 text-xs flex">
-                      {#if order.paymentStatus === "approved"}
-                        <span
-                          class="bg-emerald-100 text-emerald-800 shadow-sm border border-emerald-200 font-bold px-3 py-1.5 rounded-lg flex items-center gap-1.5"
-                        >
-                          <svg
-                            class="w-3.5 h-3.5"
-                            fill="none"
-                            stroke="currentColor"
-                            viewBox="0 0 24 24"
-                            ><path
-                              stroke-linecap="round"
-                              stroke-linejoin="round"
-                              stroke-width="2.5"
-                              d="M5 13l4 4L19 7"
-                            ></path></svg
-                          >
-                          Lunas
-                        </span>
-                      {:else}
-                        <span
-                          class="bg-amber-100 text-amber-800 shadow-sm border border-amber-200 font-bold px-3 py-1.5 rounded-lg flex items-center gap-1.5"
-                        >
-                          <div
-                            class="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse"
-                          ></div>
-                          Menunggu Konfirmasi
-                        </span>
-                      {/if}
-                    </div>
-                  </div>
-                  <div class="text-left sm:text-right mt-1 sm:mt-0">
-                    {#if order.finalTotalToPay > 0}
-                      <div class="flex flex-col">
-                        <span
-                          class="text-[10px] text-gray-500 font-bold uppercase tracking-wider mb-0.5"
-                          >Tagihan</span
-                        >
-                        <span
-                          class="text-xl sm:text-lg font-black text-gray-800 tracking-tight"
-                        >
-                          {formatRupiah(order.finalTotalToPay)}
-                        </span>
-                      </div>
-                    {:else}
-                      <span
-                        class="bg-emerald-100 border border-emerald-200 shadow-sm text-emerald-800 px-4 py-1.5 rounded-full text-sm font-black tracking-widest"
-                      >
-                        GRATIS
-                      </span>
-                    {/if}
-                  </div>
-                </div>
-              </div>
+              <span>Import Excel</span>
+              <input
+                type="file"
+                accept=".xlsx, .xls"
+                class="hidden"
+                onchange={handleImportExcel}
+                disabled={loading}
+              />
+            </label>
+          </div>
+        </div>
 
-              <!-- Order Items -->
-              <div class="p-4">
-                <div class="space-y-2">
-                  {#each order.items as item}
-                    <div
-                      class="flex items-start gap-3 py-2 border-b border-gray-100 last:border-0"
-                    >
-                      <div class="flex-1">
-                        <p class="text-gray-800 text-sm font-medium">
-                          {item.quantity}x {item.name}
-                        </p>
-                        {#if getVariantText(item)}
-                          <p class="text-gray-500 text-xs">
-                            {getVariantText(item)}
-                          </p>
-                        {/if}
-                        {#if item.addons.length > 0}
-                          <p class="text-amber-600 text-xs">
-                            + {item.addons.map((a) => a.name).join(", ")}
-                          </p>
-                        {/if}
-                      </div>
-                      <p class="text-gray-700 text-sm font-medium">
-                        {formatRupiah(item.totalItemPrice)}
-                      </p>
-                    </div>
-                  {/each}
-                </div>
-
-                <!-- Order Summary -->
-                <div
-                  class="mt-4 pt-4 border-t border-gray-200 space-y-1 text-sm"
-                >
-                  <div class="flex justify-between text-gray-600">
-                    <span>Subtotal</span>
-                    <span>{formatRupiah(order.subTotal)}</span>
-                  </div>
-                  <div class="flex justify-between text-amber-600">
-                    <span>Subsidi</span>
-                    <span>-{formatRupiah(order.subsidyApplied)}</span>
-                  </div>
-                  <div
-                    class="flex justify-between font-bold text-gray-800 pt-1"
+        {#if students.length === 0}
+          <div
+            class="p-8 text-center bg-gray-50 rounded-xl border border-dashed border-gray-200"
+          >
+            <p class="text-gray-500 mb-2">Belum ada data mahasiswa.</p>
+            <p class="text-sm text-gray-400">
+              Gunakan tombol Import Excel di atas untuk mengunggah file data.
+              Pastikan file Excel memiliki kolom yang dinamakan <b>No</b>,
+              <b>Nama</b>, dan <b>NIM</b>.
+            </p>
+          </div>
+        {:else}
+          <div class="overflow-x-auto rounded-lg border border-gray-200">
+            <table class="w-full text-left border-collapse">
+              <thead class="bg-gray-50">
+                <tr>
+                  <th
+                    class="p-4 rounded-tl-lg font-bold text-gray-700 text-sm whitespace-nowrap"
+                    >No</th
                   >
-                    <span>Total Bayar</span>
-                    <span>{formatRupiah(order.finalTotalToPay)}</span>
-                  </div>
-                </div>
-
-                {#if isAdminMode}
-                  <div
-                    class="mt-5 pt-4 border-t border-gray-100 flex flex-col sm:flex-row gap-3 justify-between sm:items-center"
+                  <th class="p-4 font-bold text-gray-700 text-sm min-w-[200px]"
+                    >Nama Lengkap</th
                   >
-                    <div
-                      class="grid grid-cols-2 sm:flex sm:flex-wrap gap-2 w-full sm:w-auto"
+                  <th
+                    class="p-4 rounded-tr-lg font-bold text-gray-700 text-sm whitespace-nowrap"
+                    >NIM</th
+                  >
+                </tr>
+              </thead>
+              <tbody>
+                {#each students as student (student.nim)}
+                  <tr
+                    class="border-b border-gray-100 hover:bg-emerald-50/30 transition-colors"
+                  >
+                    <td class="p-4 text-gray-600 text-sm font-mono"
+                      >{student.no}</td
                     >
-                      {#if order.paymentProofUrl}
-                        <button
-                          onclick={() =>
-                            (viewingImageUrl = order.paymentProofUrl || null)}
-                          class="w-full sm:w-auto text-xs sm:text-sm bg-blue-50 text-blue-700 hover:bg-blue-100 border border-blue-200 px-3 py-2 rounded-lg transition-colors flex justify-center items-center gap-1.5 font-bold shadow-sm"
-                        >
-                          Lihat Bukti
-                        </button>
-                      {/if}
-
-                      {#if order.paymentStatus !== "approved" && order.finalTotalToPay > 0}
-                        <button
-                          onclick={() => approvePayment(order)}
-                          class="w-full sm:w-auto text-xs sm:text-sm bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-2 rounded-lg transition-all font-bold shadow-sm"
-                        >
-                          Approve
-                        </button>
-                      {/if}
-                    </div>
-
-                    <div class="flex gap-2 w-full sm:w-auto">
+                    <td class="p-4 font-medium text-gray-800">{student.nama}</td
+                    >
+                    <td class="p-4 text-gray-600 text-sm font-mono"
+                      >{student.nim}</td
+                    >
+                    <td class="p-4 text-right">
                       <button
-                        onclick={() => startEditingOrder(order)}
-                        class="flex-1 sm:flex-none text-center text-sm border border-gray-300 hover:bg-gray-50 text-gray-700 font-bold px-4 py-2 rounded-lg transition-colors"
+                        onclick={() => startEditingStudent(student)}
+                        class="px-3 py-1 bg-white border border-gray-300 text-gray-700 rounded-lg text-xs font-medium hover:bg-gray-50 transition-colors"
                       >
                         Edit
                       </button>
-                      <button
-                        onclick={() => deleteOrder(order.id)}
-                        class="flex-1 sm:flex-none text-center text-sm border border-rose-200 text-rose-600 font-bold hover:bg-rose-50 px-4 py-2 rounded-lg transition-colors"
-                      >
-                        Hapus
-                      </button>
-                    </div>
-                  </div>
-                {/if}
-              </div>
-            </div>
-          {/each}
-        </div>
-      {/if}
+                    </td>
+                  </tr>
+                {/each}
+              </tbody>
+            </table>
+          </div>
+        {/if}
+      </div>
     {/if}
   </main>
 
@@ -963,6 +1201,77 @@
           <button
             onclick={saveEditedOrder}
             class="px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-colors"
+          >
+            Simpan
+          </button>
+        </div>
+      </div>
+    </div>
+  {/if}
+
+  <!-- Edit Student Modal -->
+  {#if editingStudent}
+    <div
+      class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50"
+    >
+      <div class="bg-white rounded-xl max-w-sm w-full p-6 shadow-xl">
+        <h3 class="text-lg font-bold text-gray-800 mb-4">
+          Edit Data Mahasiswa
+        </h3>
+
+        <div class="space-y-4">
+          <div>
+            <label
+              for="edit-student-no-list"
+              class="block text-sm font-medium text-gray-700 mb-1"
+              >No. Urut (Presensi)</label
+            >
+            <input
+              id="edit-student-no-list"
+              type="number"
+              class="w-full p-2 border border-emerald-300 focus:ring-2 focus:ring-emerald-500 outline-none rounded-lg transition-all"
+              bind:value={editingStudent.no}
+            />
+          </div>
+
+          <div>
+            <label
+              for="edit-student-nama"
+              class="block text-sm font-medium text-gray-700 mb-1"
+              >Nama Lengkap</label
+            >
+            <input
+              id="edit-student-nama"
+              type="text"
+              class="w-full p-2 border border-emerald-300 focus:ring-2 focus:ring-emerald-500 outline-none rounded-lg transition-all"
+              bind:value={editingStudent.nama}
+            />
+          </div>
+
+          <div>
+            <label
+              for="edit-student-nim2"
+              class="block text-sm font-medium text-gray-700 mb-1">NIM</label
+            >
+            <input
+              id="edit-student-nim2"
+              type="text"
+              class="w-full p-2 border border-emerald-300 focus:ring-2 focus:ring-emerald-500 outline-none rounded-lg transition-all"
+              bind:value={editingStudent.nim}
+            />
+          </div>
+        </div>
+
+        <div class="mt-6 flex justify-end gap-2">
+          <button
+            onclick={cancelEditingStudent}
+            class="px-4 py-2 border border-gray-300 text-gray-700 font-medium rounded-lg hover:bg-gray-50 transition-colors"
+          >
+            Batal
+          </button>
+          <button
+            onclick={saveEditedStudent}
+            class="px-5 py-2 bg-blue-600 text-white font-bold rounded-lg hover:bg-blue-700 transition-colors"
           >
             Simpan
           </button>

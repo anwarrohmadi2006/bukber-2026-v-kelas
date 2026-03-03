@@ -48,6 +48,7 @@ export interface Order {
   paymentProofUrl?: string;
   paymentStatus?: 'pending' | 'approved';
   createdAt?: string;
+  note?: string;
 }
 
 export const SUBSIDY_AMOUNT = 30000;
@@ -62,6 +63,11 @@ export const BUKBER_VARIANTS = {
 };
 
 export const MENU_DATA: Record<string, MenuItem[]> = {
+  "Paket Spesial Bukber Ayam Bumbu Rempah": [
+    { id: "b_abr1", name: "Paket ABR A1 (Ayam Rempah Nasi Daun Jeruk + Es Teh + Free Kurma)", price: 18000 },
+    { id: "b_abr2", name: "Paket ABR 2 (Ayam Rempah Nasi Daun Jeruk + Es Teh + Free Kurma & Kolak)", price: 20000 },
+    { id: "b_abr3", name: "Paket ABR 3 (Ayam Rempah Nasi Daun Jeruk + Squash + Free Kurma & Kolak)", price: 25000, requiresSquash: true }
+  ],
   "Paket Spesial Bukber Ayam": [
     { id: "b_ayam1", name: "Paket Ayam Lava/Buldak A1 (Paha Bawah + Es Teh + Free Kurma)", price: 18000, requiresAyamSauce: true },
     { id: "b_ayam2", name: "Paket Ayam Lava/Buldak A2 (Dada/Paha Atas + Es Teh + Free Kurma & Kolak)", price: 22000, requiresAyamPart: true, requiresAyamSauce: true },

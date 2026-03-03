@@ -20,6 +20,7 @@ async function ensureTable(db: any) {
         final_total INTEGER NOT NULL,
         payment_proof_url TEXT,
         payment_status TEXT DEFAULT 'pending',
+        note TEXT,
         created_at TEXT DEFAULT (datetime('now'))
       )
     `).run();
@@ -39,6 +40,9 @@ async function ensureTable(db: any) {
     }
     if (!columns.includes('payment_status')) {
       await db.prepare("ALTER TABLE orders ADD COLUMN payment_status TEXT DEFAULT 'pending'").run();
+    }
+    if (!columns.includes('note')) {
+      await db.prepare("ALTER TABLE orders ADD COLUMN note TEXT").run();
     }
   } catch (e) {
     console.error('Error ensuring table/schema:', e);
@@ -79,8 +83,8 @@ export const POST: APIRoute = async ({ request, locals }) => {
 
     // Insert order into D1 database
     const result = await db.prepare(`
-      INSERT INTO orders (user_name, user_nim, student_no, items, sub_total, subsidy_applied, final_total, payment_proof_url, payment_status, created_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+      INSERT INTO orders (user_name, user_nim, student_no, items, sub_total, subsidy_applied, final_total, payment_proof_url, payment_status, note, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
     `).bind(
       body.userName,
       body.userNIM || null,
@@ -90,7 +94,8 @@ export const POST: APIRoute = async ({ request, locals }) => {
       body.subsidyApplied,
       body.finalTotalToPay,
       body.paymentProofUrl || null,
-      body.paymentStatus || 'pending'
+      body.paymentStatus || 'pending',
+      body.note || null
     ).run();
 
     return new Response(JSON.stringify({
@@ -170,6 +175,7 @@ export const GET: APIRoute = async ({ locals, request }) => {
       finalTotalToPay: row.final_total,
       paymentProofUrl: row.payment_proof_url,
       paymentStatus: row.payment_status,
+      note: row.note,
       createdAt: row.created_at
     }));
 
@@ -208,7 +214,7 @@ export const PUT: APIRoute = async ({ request, locals }) => {
     }
 
     const body: Order = await request.json();
-    const { id, userName, userNIM, studentNo, items, subTotal, subsidyApplied, finalTotalToPay, paymentProofUrl, paymentStatus } = body;
+    const { id, userName, userNIM, studentNo, items, subTotal, subsidyApplied, finalTotalToPay, paymentProofUrl, paymentStatus, note } = body;
 
     if (!id) {
       return new Response(JSON.stringify({
@@ -233,7 +239,7 @@ export const PUT: APIRoute = async ({ request, locals }) => {
     // Update order in D1 database
     const result = await db.prepare(`
       UPDATE orders 
-      SET user_name = ?, user_nim = ?, student_no = ?, items = ?, sub_total = ?, subsidy_applied = ?, final_total = ?, payment_proof_url = ?, payment_status = ?
+      SET user_name = ?, user_nim = ?, student_no = ?, items = ?, sub_total = ?, subsidy_applied = ?, final_total = ?, payment_proof_url = ?, payment_status = ?, note = ?
       WHERE id = ?
     `).bind(
       userName,
@@ -245,6 +251,7 @@ export const PUT: APIRoute = async ({ request, locals }) => {
       finalTotalToPay,
       paymentProofUrl || null,
       paymentStatus || 'pending',
+      note || null,
       id
     ).run();
 

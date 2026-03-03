@@ -40,6 +40,7 @@ export const userName = writable<string>('');
 export const userNIM = writable<string>('');
 export const studentNo = writable<number>(0);
 export const existingOrderId = writable<string | null>(null);
+export const orderNote = writable<string>('');
 
 // Dynamic subsidy amount store — fetched from API, default from menu.ts
 export const subsidyAmountStore = writable<number>(SUBSIDY_AMOUNT);
@@ -98,7 +99,8 @@ export function generateOrderPayload(): Order {
     items: get(cart),
     subTotal: get(subTotal),
     subsidyApplied: get(subsidyApplied),
-    finalTotalToPay: get(finalTotalToPay)
+    finalTotalToPay: get(finalTotalToPay),
+    note: get(orderNote)
   };
 }
 
@@ -109,4 +111,6 @@ export function resetOrder() {
   userNIM.set('');
   studentNo.set(0);
   existingOrderId.set(null);
+  orderNote.set('');
 }
+

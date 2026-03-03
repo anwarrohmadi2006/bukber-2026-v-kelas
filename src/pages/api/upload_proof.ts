@@ -45,7 +45,8 @@ export const POST: APIRoute = async ({ request, locals }) => {
         // Cloudflare Pages specific: if bucket is not public, you might need a separate 
         // endpoint to serve images. For now, we will store the unique key as the URL 
         // and create a GET handler here to serve the image.
-        const fileUrl = `/api/upload_proof?key=${uniqueFileName}`;
+        const origin = new URL(request.url).origin;
+        const fileUrl = `${origin}/api/upload_proof?key=${uniqueFileName}`;
 
         // Update the database with the URL
         await db.prepare(`
